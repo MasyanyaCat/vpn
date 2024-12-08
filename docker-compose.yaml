@@ -1,0 +1,105 @@
+services:
+  wg-easy:
+    image: ghcr.io/wg-easy/wg-easy
+    environment:
+      # Change Language:
+      # (Supports: en, ua, ru, tr, no, pl, fr, de, ca, es, ko, vi, nl, is, pt, chs, cht, it, th, hi, ja, si)
+      - LANG=en
+      # ⚠️ Required:
+      # Change this to your host's public address
+      - WG_HOST=10.2.0.3
+      - PASSWORD_HASH=$$2y$$10$$hBCoykrB95WSzuV4fafBzOHWKu9sbyVa34GJr8VV5R/pIelfEMYyG 
+      - WG_ALLOWED_IPS=10.8.0.0/24, 10.3.0.0/24
+      - WG_POST_UP=ip route add 10.1.0.0/24 via 10.2.0.2; iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o eth1 -j MASQUERADE;
+      - WG_POST_DOWN=ip route del 10.1.0.0/24 via 10.2.0.2; iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o eth1 -j MASQUERADE;
+    container_name: wg-easy
+    volumes:
+      - ./conf:/etc/wireguard
+    ports:
+      - "51820:51820/udp"
+      - "51821:51821/tcp"
+    networks:
+      netB:
+        ipv4_address: 10.2.0.3
+      netC:
+        ipv4_address: 10.3.0.3
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+      # - NET_RAW # ⚠️ Uncomment if using Podman
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+  peer:
+    build: .
+    volumes:
+      - ./client-config:/etc/wireguard/
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+    privileged: true
+    tty: true
+    depends_on:
+      - wg-easy
+    container_name: peer
+    networks:
+      netA:
+        ipv4_address: 10.1.0.5
+
+  gateway:
+    image: nicolaka/netshoot
+    container_name: gateway
+    networks:
+      netA:
+        ipv4_address: 10.1.0.2
+      netB:
+        ipv4_address: 10.2.0.2
+    tty: true
+    command: tcpdump -C 1 -W 1 -w /data/gateway.pcap
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./dump/:/data
+
+
+  webserver:
+    build: ./Webserver
+    container_name: nginx
+    ports:
+      - 8080:8080
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    privileged: true
+    restart: unless-stopped
+    networks:
+      netC:
+        ipv4_address: 10.3.0.7
+
+
+
+
+
+networks:
+  netA:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.1.0.0/24
+          gateway: 10.1.0.1
+  netB:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.2.0.0/24
+          gateway: 10.2.0.1
+  netC:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.3.0.0/24
+          gateway: 10.3.0.1
